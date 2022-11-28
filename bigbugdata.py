@@ -120,11 +120,14 @@ def run(
         # Add new row to rpm_data
         rpm_data.append(rpm_row)
 
+    # For each organism, calculate z scores in each sample of their rpm
     for row in rpm_data:
-        z_scores = stats.zscore([row[str(x)] for x in range(1, 96)])
-        for i, value in enumerate(z_scores, start=1):
-            if sample_organism_data.get((str(i), row["taxName"])):
-                sample_organism_data[(str(i), row["taxName"])]["z_score"] = value
+        # z scores for a single organism, across all samples
+        z_scores = stats.zscore([row[sample] for sample in sample_names])
+
+        for sample, z_score in zip(sample_names, z_scores):
+            if sample_organism_data.get((sample, row["taxName"])):
+                sample_organism_data[(sample, row["taxName"])]["z_score"] = z_score
 
     # Set up negative groups
     negative_group = {
