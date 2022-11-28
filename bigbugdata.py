@@ -1,3 +1,4 @@
+from scipy import stats
 import argparse
 import glob
 import csv
@@ -21,7 +22,7 @@ def run(
     ]
 
     # Data needed for final tophits output
-    sample_organism_kmer_dup_data = {}
+    sample_organism_data = {}
 
     # Dictionary to store output combined species data
     combined_species_data = {}
@@ -39,10 +40,12 @@ def run(
                 organism = row["taxName"]
 
                 # Stored for future use in tophits output
-                sample_organism_kmer_dup_data[(sample_name, organism)] = (
-                    row["kmers"],
-                    row["dup"],
-                )
+                sample_organism_data[(sample_name, organism)] = {
+                    "kmers": row["kmers"],
+                    "dup": row["dup"],
+                    "reads": row["reads"],
+                    "cov": row["cov"],
+                }
 
                 # If the organism hasn't been recorded in the combined species data, make a new entry for it
                 if combined_species_data.get(organism) is None:
@@ -117,6 +120,12 @@ def run(
         # Add new row to rpm_data
         rpm_data.append(rpm_row)
 
+    for row in rpm_data:
+        z_scores = stats.zscore([row[str(x)] for x in range(1, 96)])
+        for i, value in enumerate(z_scores, start=1):
+            if sample_organism_data.get((str(i), row["taxName"])):
+                sample_organism_data[(str(i), row["taxName"])]["z_score"] = value
+
     # Set up negative groups
     negative_group = {
         "6": {str(x) for x in range(1, 7)},
@@ -176,33 +185,43 @@ def run(
     tophits_data = []
     for sample in sample_names:
         sorted_data = sorted(rrpm_data, key=lambda x: x[sample], reverse=True)
-        topfifteen = [(x["taxName"], x[sample]) for x in sorted_data[0:16]]
+        topfifteen = [(x["taxName"], x[sample]) for x in sorted_data[0:15]]
 
         for i, (taxname, rrpm) in enumerate(topfifteen, start=1):
-            kmers_dup = sample_organism_kmer_dup_data.get((sample, taxname))
+            sample_org = sample_organism_data.get((sample, taxname))
 
             # If number of organisms in a sample is less than 15, then the top 15 will include organisms not in the sample
             # This needs to be checked
-            if kmers_dup is not None:
-                kmers, dup = kmers_dup
+            if sample_org is not None:
                 tophits_row = {
                     "sampleName": sample,
                     "taxName": taxname,
                     "rank": i,
                     "rRPM": rrpm,
-                    "kmers": kmers,
-                    "dup": dup,
+                    "kmers": sample_org["kmers"],
+                    "dup": sample_org["dup"],
+                    "reads": sample_org["reads"],
+                    "cov": sample_org["cov"],
+                    "z_score": sample_org["z_score"],
                 }
 
                 tophits_data.append(tophits_row)
-            else:
-                print(sample, i, taxname)
 
     # Write the data to tophits_out
     with open(tophits_out, "w") as tophits_file:
         writer = csv.DictWriter(
             tophits_file,
-            fieldnames=["sampleName", "taxName", "rank", "rRPM", "kmers", "dup"],
+            fieldnames=[
+                "sampleName",
+                "taxName",
+                "rank",
+                "rRPM",
+                "kmers",
+                "dup",
+                "reads",
+                "cov",
+                "z_score",
+            ],
         )
 
         writer.writeheader()
