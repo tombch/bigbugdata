@@ -36,8 +36,8 @@ def run(
 
             # For each row in the tsv file
             for row in tsv_reader:
-                # The name of the current organism
-                organism = row["taxName"]
+                # The taxID of the current organism
+                organism = int(row["taxID"])
 
                 # Stored for future use in tophits output
                 sample_organism_data[(sample_name, organism)] = {
@@ -54,10 +54,9 @@ def run(
                         s_name: 0 for s_name in sample_names
                     }
 
-                    # The entry also contains the name of the organism
-                    combined_species_data[organism]["taxName"] = organism
-
-                    # The entry also contains the total number of reads for the organism
+                    # The entry also contains the taxID, taxName and total number of reads for the organism
+                    combined_species_data[organism]["taxID"] = organism
+                    combined_species_data[organism]["taxName"] = row["taxName"]
                     combined_species_data[organism]["Total # of Reads"] = 0
 
                 # For the current organism and sample, add the number of reads
@@ -78,13 +77,13 @@ def run(
     with open(combined_species_out, "w") as combined_species_file:
         writer = csv.DictWriter(
             combined_species_file,
-            fieldnames=["taxName", "Total # of Reads"] + sample_names,
+            fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_names,
         )
 
         writer.writeheader()
 
         for row in combined_species_data:
-            writer.writerow(row)
+            writer.writerow({x : str(y) for x, y in row.items()})
 
     # Dictionary for storing the num million reads for each sample
     num_million_reads = {}
@@ -109,6 +108,7 @@ def run(
     rpm_data = []
     for row in combined_species_data:
         rpm_row = {
+            "taxID": row["taxID"],
             "taxName": row["taxName"],
             "Total # of Reads": row["Total # of Reads"],
         }
@@ -126,8 +126,8 @@ def run(
         z_scores = stats.zscore([row[sample] for sample in sample_names])
 
         for sample, z_score in zip(sample_names, z_scores):
-            if sample_organism_data.get((sample, row["taxName"])):
-                sample_organism_data[(sample, row["taxName"])]["z_score"] = z_score
+            if sample_organism_data.get((sample, row["taxID"])):
+                sample_organism_data[(sample, row["taxID"])]["z_score"] = z_score
 
     # Set up negative groups
     negative_group = {
@@ -147,6 +147,7 @@ def run(
     rrpm_data = []
     for row in rpm_data:
         rrpm_row = {
+            "taxID" : row["taxID"],
             "taxName": row["taxName"],
             "Total # of Reads": row["Total # of Reads"],
         }
@@ -176,28 +177,29 @@ def run(
     with open(rrpm_out, "w") as rrpm_file:
         writer = csv.DictWriter(
             rrpm_file,
-            fieldnames=["taxName", "Total # of Reads"] + sample_names,
+            fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_names,
         )
 
         writer.writeheader()
 
         for row in rrpm_data:
-            writer.writerow(row)
+            writer.writerow({x : str(y) for x, y in row.items()})
 
     # Calculate tophits for each sample
     tophits_data = []
     for sample in sample_names:
         sorted_data = sorted(rrpm_data, key=lambda x: x[sample], reverse=True)
-        topfifteen = [(x["taxName"], x[sample]) for x in sorted_data[0:15]]
+        topfifteen = [(x["taxID"], x["taxName"], x[sample]) for x in sorted_data[0:15]]
 
-        for i, (taxname, rrpm) in enumerate(topfifteen, start=1):
-            sample_org = sample_organism_data.get((sample, taxname))
+        for i, (taxid, taxname, rrpm) in enumerate(topfifteen, start=1):
+            sample_org = sample_organism_data.get((sample, taxid))
 
             # If number of organisms in a sample is less than 15, then the top 15 will include organisms not in the sample
             # This needs to be checked
             if sample_org is not None:
                 tophits_row = {
                     "sampleName": sample,
+                    "taxID" : taxid,
                     "taxName": taxname,
                     "rank": i,
                     "rRPM": rrpm,
@@ -216,6 +218,7 @@ def run(
             tophits_file,
             fieldnames=[
                 "sampleName",
+                "taxID",
                 "taxName",
                 "rank",
                 "rRPM",
@@ -230,7 +233,7 @@ def run(
         writer.writeheader()
 
         for row in tophits_data:
-            writer.writerow(row)
+            writer.writerow({x : str(y) for x, y in row.items()})
 
 
 def main():
