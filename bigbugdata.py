@@ -56,7 +56,7 @@ def run(
 
                     # The entry also contains the taxID, taxName and total number of reads for the organism
                     combined_species_data[organism]["taxID"] = organism
-                    combined_species_data[organism]["taxName"] = row["taxName"]
+                    combined_species_data[organism]["taxName"] = row["taxName"].strip() # damn you kraken
                     combined_species_data[organism]["Total # of Reads"] = 0
 
                 # For the current organism and sample, add the number of reads
