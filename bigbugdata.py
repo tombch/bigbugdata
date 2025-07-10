@@ -29,7 +29,6 @@ def run(
 
     # For each tsv (and its corresponding sample name) in the folder
     for tsv_path, sample_name in zip(species_level_paths, sample_names):
-
         # Open the tsv file
         with open(tsv_path) as tsv_file:
             tsv_reader = csv.DictReader(tsv_file, delimiter="\t")
@@ -56,7 +55,9 @@ def run(
 
                     # The entry also contains the taxID, taxName and total number of reads for the organism
                     combined_species_data[organism]["taxID"] = organism
-                    combined_species_data[organism]["taxName"] = row["taxName"].strip() # damn you kraken
+                    combined_species_data[organism]["taxName"] = row[
+                        "taxName"
+                    ].strip()  # damn you kraken
                     combined_species_data[organism]["Total # of Reads"] = 0
 
                 # For the current organism and sample, add the number of reads
@@ -83,7 +84,7 @@ def run(
         writer.writeheader()
 
         for row in combined_species_data:
-            writer.writerow({x : str(y) for x, y in row.items()})
+            writer.writerow({x: str(y) for x, y in row.items()})
 
     # Dictionary for storing the num million reads for each sample
     num_million_reads = {}
@@ -123,7 +124,7 @@ def run(
     # For each organism, calculate z scores in each sample of their rpm
     for row in rpm_data:
         # z scores for a single organism, across all samples
-        z_scores = stats.zscore([row[sample] for sample in sample_names])
+        z_scores = [x for x in stats.zscore([row[sample] for sample in sample_names])]
 
         for sample, z_score in zip(sample_names, z_scores):
             if sample_organism_data.get((sample, row["taxID"])):
@@ -147,7 +148,7 @@ def run(
     rrpm_data = []
     for row in rpm_data:
         rrpm_row = {
-            "taxID" : row["taxID"],
+            "taxID": row["taxID"],
             "taxName": row["taxName"],
             "Total # of Reads": row["Total # of Reads"],
         }
@@ -183,7 +184,7 @@ def run(
         writer.writeheader()
 
         for row in rrpm_data:
-            writer.writerow({x : str(y) for x, y in row.items()})
+            writer.writerow({x: str(y) for x, y in row.items()})
 
     # Calculate tophits for each sample
     tophits_data = []
@@ -199,7 +200,7 @@ def run(
             if sample_org is not None:
                 tophits_row = {
                     "sampleName": sample,
-                    "taxID" : taxid,
+                    "taxID": taxid,
                     "taxName": taxname,
                     "rank": i,
                     "rRPM": rrpm,
@@ -233,7 +234,7 @@ def run(
         writer.writeheader()
 
         for row in tophits_data:
-            writer.writerow({x : str(y) for x, y in row.items()})
+            writer.writerow({x: str(y) for x, y in row.items()})
 
 
 def main():
