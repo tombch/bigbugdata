@@ -30,8 +30,9 @@ def run(
     # Get output paths for the results
     combined_species_out, rrpm_out, tophits_out = get_output_paths(results_dir)
 
-    # Sample names from each tsv
-    sample_names = [os.path.basename(tsv_path).split("_")[0] for tsv_path in reports]
+    # Sample names from each report
+    # Obtained by partition on the last underscore in the report filename
+    sample_names = [os.path.basename(report).rpartition("_")[0] for report in reports]
 
     # Data needed for final tophits output
     sample_organism_data = {}
