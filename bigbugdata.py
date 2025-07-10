@@ -1,13 +1,15 @@
 from scipy import stats
 from pathlib import Path
+from typing import Any
 import argparse
 import csv
 import os
+import re
 
 
-def get_output_paths(results_dir):
+def get_output_paths(results_dir: str) -> tuple[Path, Path, Path]:
     """
-    Returns the output file paths for combined species, rrpm, and tophits.
+    Get the output file paths for combined species, rrpm, and tophits.
     """
 
     # Create the results directory if it doesn't exist
@@ -21,33 +23,88 @@ def get_output_paths(results_dir):
     return combined_species_out, rrpm_out, tophits_out
 
 
+def get_sample_names(report_paths: list[str]) -> dict[str, str]:
+    """
+    Get mapping of sample names to their report paths by partitioning on the last underscore.
+    """
+
+    return {
+        os.path.basename(report).rpartition("_")[0]: report for report in report_paths
+    }
+
+
+def get_negative_groups(
+    sample_names: list[str],
+    negative_group_patterns: list[tuple[str, str]] | None,
+) -> dict[str, set[str]]:
+    """
+    Get a dictionary mapping negative samples to their negative groups based on the provided patterns.
+    """
+
+    negative_groups = {}
+
+    if negative_group_patterns is not None:
+        for negative_sample_pattern, negative_group_pattern in negative_group_patterns:
+            # Find sample that matches the negative sample pattern
+            matching_negative_samples = [
+                sample
+                for sample in sample_names
+                if re.search(negative_sample_pattern, sample)
+            ]
+            if len(matching_negative_samples) != 1:
+                raise ValueError(
+                    f"Expected one sample matching '{negative_sample_pattern}', found: {len(matching_negative_samples)}"
+                )
+            negative_sample = matching_negative_samples[0]
+
+            # Find all samples that match the negative group pattern
+            matching_group_samples = [
+                sample
+                for sample in sample_names
+                if re.search(negative_group_pattern, sample)
+            ]
+            if not matching_group_samples:
+                raise ValueError(
+                    f"No samples found matching the group pattern '{negative_group_pattern}'"
+                )
+
+            # Add negative sample and group samples to the negative group dictionary
+            negative_groups[negative_sample] = set(matching_group_samples)
+
+    return negative_groups
+
+
 def run(
-    reports: list[str],
+    report_paths: list[str],
+    results_path: str,
+    negative_group_patterns: list[tuple[str, str]] | None,
     dna_totalreads: str,
     rna_totalreads: str,
-    results_dir: str,
 ):
     # Get output paths for the results
-    combined_species_out, rrpm_out, tophits_out = get_output_paths(results_dir)
+    combined_species_out, rrpm_out, tophits_out = get_output_paths(results_path)
 
-    # Sample names from each report
-    # Obtained by partition on the last underscore in the report filename
-    sample_names = [os.path.basename(report).rpartition("_")[0] for report in reports]
+    # Get sample names mapped to their report paths
+    sample_names = get_sample_names(report_paths)
 
-    # Data needed for final tophits output
-    sample_organism_data = {}
+    # Mapping of sample name and taxID to their data
+    sample_organism_data: dict[tuple[str, int], dict[str, Any]] = {}
 
     # Dictionary to store output combined species data
-    combined_species_data = {}
+    combined_species_data: dict[int, dict[str, Any]] = {}
 
-    # For each tsv (and its corresponding sample name) in the folder
-    for tsv_path, sample_name in zip(reports, sample_names):
-        # Open the tsv file
-        with open(tsv_path) as tsv_file:
-            tsv_reader = csv.DictReader(tsv_file, delimiter="\t")
+    # For each report (and its corresponding sample name) in the folder
+    for sample_name, report_path in sample_names.items():
+        # Open the report file
+        with open(report_path) as report_file:
+            report_reader = csv.DictReader(report_file, delimiter="\t")
 
-            # For each row in the tsv file
-            for row in tsv_reader:
+            # For each row in the report file
+            for row in report_reader:
+                # Skip rows that are not at the species level
+                if row["rank"] != "species":
+                    continue
+
                 # The taxID of the current organism
                 organism = int(row["taxID"])
 
@@ -84,8 +141,8 @@ def run(
     organisms = list(combined_species_data.keys())
     organisms.sort()
 
-    # Reformat data into list of dictionaries
-    combined_species_data = [combined_species_data[organism] for organism in organisms]
+    # Format data into list of dictionaries
+    combined_species_list = [combined_species_data[organism] for organism in organisms]
 
     # Write the data to combined_species_out
     with open(combined_species_out, "w") as combined_species_file:
@@ -96,7 +153,7 @@ def run(
 
         writer.writeheader()
 
-        for row in combined_species_data:
+        for row in combined_species_list:
             writer.writerow({x: str(y) for x, y in row.items()})
 
     # Dictionary for storing the num million reads for each sample
@@ -120,7 +177,7 @@ def run(
 
     # Calculate RPM for each organism and sample
     rpm_data = []
-    for row in combined_species_data:
+    for row in combined_species_list:
         rpm_row = {
             "taxID": row["taxID"],
             "taxName": row["taxName"],
@@ -144,18 +201,7 @@ def run(
                 sample_organism_data[(sample, row["taxID"])]["z_score"] = z_score
 
     # Set up negative groups
-    negative_group = {
-        "6": {str(x) for x in range(1, 7)},
-        "18": {str(x) for x in range(7, 19)},
-        "30": {str(x) for x in range(19, 31)},
-        "42": {str(x) for x in range(31, 43)},
-        "48": {str(x) for x in range(43, 49)},
-        "54": {str(x) for x in range(49, 55)},
-        "66": {str(x) for x in range(55, 67)},
-        "78": {str(x) for x in range(67, 79)},
-        "90": {str(x) for x in range(79, 91)},
-        "95": {str(x) for x in range(91, 96)},
-    }
+    negative_groups = get_negative_groups(sample_names, negative_group_patterns)
 
     # Calculate rRPM for each organism and sample
     rrpm_data = []
@@ -168,7 +214,7 @@ def run(
 
         for sample in sample_names:
             negative_sample = ""
-            for negative, group in negative_group.items():
+            for negative, group in negative_groups.items():
                 if sample in group:
                     negative_sample = negative
                     break
@@ -257,7 +303,15 @@ def main():
         required=True,
         type=str,
         nargs="+",
-        help="Pathname pattern of KrakenUniq report.txt files",
+        help="Input KrakenUniq report files",
+    )
+    parser.add_argument(
+        "--negative-group",
+        required=False,
+        nargs=2,
+        action="append",
+        metavar=("NEGATIVE_SAMPLE_PATTERN", "NEGATIVE_GROUP_PATTERN"),
+        help="Negative control group definition. Provide patterns for matching the negative sample and its group.",
     )
     parser.add_argument(
         "--dna-totalreads",
@@ -269,7 +323,7 @@ def main():
         "--rna-totalreads", required=True, help="Input .tsv file of RNA total reads"
     )
     parser.add_argument(
-        "--results-dir",
+        "--results",
         required=False,
         type=str,
         default="results",
@@ -279,10 +333,11 @@ def main():
     args = parser.parse_args()
 
     run(
-        reports=args.reports,
+        report_paths=args.reports,
+        results_path=args.results,
+        negative_group_patterns=args.negative_group,
         dna_totalreads=args.dna_totalreads,
         rna_totalreads=args.rna_totalreads,
-        results_dir=args.results_dir,
     )
 
 
