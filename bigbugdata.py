@@ -1,25 +1,37 @@
 from scipy import stats
+from pathlib import Path
 import argparse
-import glob
 import csv
 import os
 
 
+def get_output_paths(results_dir):
+    """
+    Returns the output file paths for combined species, rrpm, and tophits.
+    """
+
+    # Create the results directory if it doesn't exist
+    Path(results_dir).mkdir(parents=True, exist_ok=True)
+
+    # Output file paths
+    combined_species_out = Path(results_dir) / "combined_species.csv"
+    rrpm_out = Path(results_dir) / "rrpm.csv"
+    tophits_out = Path(results_dir) / "tophits.csv"
+
+    return combined_species_out, rrpm_out, tophits_out
+
+
 def run(
-    species_level_reports,
-    dna_totalreads,
-    rna_totalreads,
-    combined_species_out,
-    rrpm_out,
-    tophits_out,
+    reports: list[str],
+    dna_totalreads: str,
+    rna_totalreads: str,
+    results_dir: str,
 ):
-    # List of file paths for each input kraken tsv
-    species_level_paths = glob.glob(f"{species_level_reports}/*.tsv")
+    # Get output paths for the results
+    combined_species_out, rrpm_out, tophits_out = get_output_paths(results_dir)
 
     # Sample names from each tsv
-    sample_names = [
-        os.path.basename(tsv_path).split("_")[0] for tsv_path in species_level_paths
-    ]
+    sample_names = [os.path.basename(tsv_path).split("_")[0] for tsv_path in reports]
 
     # Data needed for final tophits output
     sample_organism_data = {}
@@ -28,7 +40,7 @@ def run(
     combined_species_data = {}
 
     # For each tsv (and its corresponding sample name) in the folder
-    for tsv_path, sample_name in zip(species_level_paths, sample_names):
+    for tsv_path, sample_name in zip(reports, sample_names):
         # Open the tsv file
         with open(tsv_path) as tsv_file:
             tsv_reader = csv.DictReader(tsv_file, delimiter="\t")
@@ -240,40 +252,36 @@ def run(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--species-level-reports",
+        "--reports",
         required=True,
-        help="Input directory of species level report .tsv files",
+        type=str,
+        nargs="+",
+        help="Pathname pattern of KrakenUniq report.txt files",
     )
     parser.add_argument(
-        "--dna-totalreads", required=True, help="Input .tsv file of DNA total reads"
+        "--dna-totalreads",
+        required=True,
+        type=str,
+        help="Input .tsv file of DNA total reads",
     )
     parser.add_argument(
         "--rna-totalreads", required=True, help="Input .tsv file of RNA total reads"
     )
-
     parser.add_argument(
-        "--combined-species-out",
-        required=True,
-        help="Output .csv file for the combined species data",
-    )
-    parser.add_argument(
-        "--rrpm-out", required=True, help="Output .csv file for the rrpm data"
-    )
-    parser.add_argument(
-        "--tophits-out",
-        required=True,
-        help="Output .csv file for the tophits data",
+        "--results-dir",
+        required=False,
+        type=str,
+        default="results",
+        help="Directory to store the output files (default: results)",
     )
 
     args = parser.parse_args()
 
     run(
-        species_level_reports=args.species_level_reports,
+        reports=args.reports,
         dna_totalreads=args.dna_totalreads,
         rna_totalreads=args.rna_totalreads,
-        combined_species_out=args.combined_species_out,
-        rrpm_out=args.rrpm_out,
-        tophits_out=args.tophits_out,
+        results_dir=args.results_dir,
     )
 
 
