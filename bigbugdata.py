@@ -1,10 +1,11 @@
-from scipy import stats
-from pathlib import Path
-from typing import Any
-import argparse
-import csv
 import os
 import re
+import csv
+import argparse
+from typing import Any
+from pathlib import Path
+from importlib.metadata import version
+from scipy import stats
 
 
 def get_output_paths(results_dir: str, rank: str) -> tuple[Path, Path, Path]:
@@ -365,12 +366,12 @@ def main():
     )
     parser.add_argument(
         "-n",
-        "--negative-control-group",
+        "--nc-group",
         required=False,
         nargs=2,
         action="append",
-        metavar=("NEGATIVE_CONTROL_PATTERN", "NEGATIVE_GROUP_PATTERN"),
-        help="Provide REGEX patterns to match a negative control and its group of samples.",
+        metavar=("CONTROL", "GROUP"),
+        help="Provide REGEX patterns to match a negative control and its group of samples",
     )
     parser.add_argument(
         "-R",
@@ -388,6 +389,13 @@ def main():
         default=15,
         help="Number of top hits to include in the tophits output (default: 15)",
     )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {version('bigbugdata')}",
+        help="Output the version of bigbugdata",
+    )
 
     args = parser.parse_args()
 
@@ -396,7 +404,7 @@ def main():
         results_path=args.output,
         rank=args.rank,
         n_tophits=args.tophits,
-        group_patterns=args.negative_control_group,
+        group_patterns=args.nc_group,
     )
 
 
