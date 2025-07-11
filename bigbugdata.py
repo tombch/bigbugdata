@@ -74,6 +74,68 @@ def get_negative_control_groups(
     return negative_groups
 
 
+def get_rpms(
+    combined_taxa_list: list[dict[str, Any]],
+    n_reads: dict[str, int],
+) -> list[dict[str, Any]]:
+    """
+    Calculate RPM for each organism and sample based on the combined taxa data and number of reads.
+    """
+
+    rpm_data = []
+    for row in combined_taxa_list:
+        rpm_row = {
+            "taxID": row["taxID"],
+            "taxName": row["taxName"],
+            "Total # of Reads": row["Total # of Reads"],
+        }
+
+        # For the sample columns, divide the value by num_million_reads for the sample
+        for sample_id in n_reads:
+            rpm_row[sample_id] = int(row[sample_id]) / (n_reads[sample_id] / 1_000_000)
+
+        # Add new row to rpm_data
+        rpm_data.append(rpm_row)
+
+    return rpm_data
+
+
+def get_rrpms(
+    rpm_data: list[dict[str, Any]],
+    sample_ids: list[str],
+    negative_groups: dict[str, set[str]],
+) -> list[dict[str, Any]]:
+    """
+    Calculate rRPM for each organism and sample based on the RPM data and negative control groups.
+    """
+
+    rrpm_data = []
+    for row in rpm_data:
+        rrpm_row = {
+            "taxID": row["taxID"],
+            "taxName": row["taxName"],
+            "Total # of Reads": row["Total # of Reads"],
+        }
+
+        for sample_id in sample_ids:
+            negative_control_id = ""
+            for negative, group in negative_groups.items():
+                if sample_id in group:
+                    negative_control_id = negative
+                    break
+
+            negative_control_rpm = int(row.get(negative_control_id, 1))
+            if negative_control_rpm == 0:
+                negative_control_rpm = 1
+
+            # Calculate rRPM as RPM of the sample divided by RPM of the negative control
+            rrpm_row[sample_id] = int(row[sample_id]) / int(negative_control_rpm)
+
+        rrpm_data.append(rrpm_row)
+
+    return rrpm_data
+
+
 def run(
     report_paths: list[str],
     results_path: str,
@@ -168,20 +230,7 @@ def run(
             writer.writerow({x: str(y) for x, y in row.items()})
 
     # Calculate RPM for each organism and sample
-    rpm_data = []
-    for row in combined_taxa_list:
-        rpm_row = {
-            "taxID": row["taxID"],
-            "taxName": row["taxName"],
-            "Total # of Reads": row["Total # of Reads"],
-        }
-
-        # For the sample columns, divide the value by num_million_reads for the sample
-        for sample_id in sample_ids:
-            rpm_row[sample_id] = int(row[sample_id]) / (n_reads[sample_id] / 1_000_000)
-
-        # Add new row to rpm_data
-        rpm_data.append(rpm_row)
+    rpm_data = get_rpms(combined_taxa_list, n_reads)
 
     # For each organism, calculate z scores in each sample of their rpm
     for row in rpm_data:
@@ -198,34 +247,7 @@ def run(
     negative_groups = get_negative_control_groups(sample_ids, group_patterns)
 
     # Calculate rRPM for each organism and sample
-    rrpm_data = []
-    for row in rpm_data:
-        rrpm_row = {
-            "taxID": row["taxID"],
-            "taxName": row["taxName"],
-            "Total # of Reads": row["Total # of Reads"],
-        }
-
-        for sample_id in sample_ids:
-            negative_sample = ""
-            for negative, group in negative_groups.items():
-                if sample_id in group:
-                    negative_sample = negative
-                    break
-
-            negative_value = 0
-            for s in sample_ids:
-                if s == negative_sample:
-                    negative_value = int(row[s])
-                    break
-
-            if negative_value == 0:
-                negative_value = 1
-
-            # Add new row to rrpm_data
-            rrpm_row[sample_id] = int(row[sample_id]) / int(negative_value)
-
-        rrpm_data.append(rrpm_row)
+    rrpm_data = get_rrpms(rpm_data, sample_ids, negative_groups)
 
     # Write the data to rrpm_path
     with open(rrpm_path, "w") as rrpm_file:
