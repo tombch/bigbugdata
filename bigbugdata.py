@@ -136,10 +136,68 @@ def get_rrpms(
     return rrpm_data
 
 
+def get_tophits(
+    rrpm_data: list[dict[str, Any]],
+    sample_ids: list[str],
+    sample_organism_data: dict[tuple[str, int], dict[str, Any]],
+    n_tophits: int,
+) -> list[dict[str, Any]]:
+    """
+    Get the top hits for each sample based on the rRPM data.
+    """
+
+    tophits_data = []
+    for sample_id in sample_ids:
+        sorted_data = sorted(rrpm_data, key=lambda x: x[sample_id], reverse=True)
+        tophits = [
+            (x["taxID"], x["taxName"], x[sample_id]) for x in sorted_data[0:n_tophits]
+        ]
+
+        for i, (taxid, taxname, rrpm) in enumerate(tophits, start=1):
+            sample_org = sample_organism_data.get((sample_id, taxid))
+
+            # If number of organisms in a sample is less than 15, then the top n_tophits will include organisms not in the sample
+            # This needs to be checked <-- TODO what does this mean?
+            if sample_org is not None:
+                tophits_row = {
+                    "sampleName": sample_id,
+                    "taxID": taxid,
+                    "taxName": taxname,
+                    "rank": i,
+                    "rRPM": rrpm,
+                    "kmers": sample_org["kmers"],
+                    "dup": sample_org["dup"],
+                    "reads": sample_org["reads"],
+                    "cov": sample_org["cov"],
+                    "z_score": sample_org["z_score"],
+                }
+
+                tophits_data.append(tophits_row)
+
+    return tophits_data
+
+
+def write_file(
+    file_path: Path,
+    data: list[dict[str, Any]],
+    fieldnames: list[str],
+):
+    """
+    Write the data to a CSV file at the specified path.
+    """
+
+    with open(file_path, "w") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in data:
+            writer.writerow({x: str(y) for x, y in row.items()})
+
+
 def run(
     report_paths: list[str],
     results_path: str,
     rank: str,
+    n_tophits: int,
     group_patterns: list[tuple[str, str]] | None,
 ):
     # Output paths for the results
@@ -217,17 +275,12 @@ def run(
     # Format data into list of dictionaries
     combined_taxa_list = [combined_taxa_data[organism] for organism in organisms]
 
-    # Write the data to combined_taxa_path
-    with open(combined_taxa_path, "w") as combined_taxa_file:
-        writer = csv.DictWriter(
-            combined_taxa_file,
-            fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_ids,
-        )
-
-        writer.writeheader()
-
-        for row in combined_taxa_list:
-            writer.writerow({x: str(y) for x, y in row.items()})
+    # Write the combined_taxa file
+    write_file(
+        file_path=combined_taxa_path,
+        data=combined_taxa_list,
+        fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_ids,
+    )
 
     # Calculate RPM for each organism and sample
     rpm_data = get_rpms(combined_taxa_list, n_reads)
@@ -249,66 +302,33 @@ def run(
     # Calculate rRPM for each organism and sample
     rrpm_data = get_rrpms(rpm_data, sample_ids, negative_groups)
 
-    # Write the data to rrpm_path
-    with open(rrpm_path, "w") as rrpm_file:
-        writer = csv.DictWriter(
-            rrpm_file,
-            fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_ids,
-        )
-
-        writer.writeheader()
-
-        for row in rrpm_data:
-            writer.writerow({x: str(y) for x, y in row.items()})
+    # Write the rrpm file
+    write_file(
+        file_path=rrpm_path,
+        data=rrpm_data,
+        fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_ids,
+    )
 
     # Calculate tophits for each sample
-    tophits_data = []
-    for sample_id in sample_ids:
-        sorted_data = sorted(rrpm_data, key=lambda x: x[sample_id], reverse=True)
-        topfifteen = [
-            (x["taxID"], x["taxName"], x[sample_id]) for x in sorted_data[0:15]
-        ]
+    tophits_data = get_tophits(rrpm_data, sample_ids, sample_organism_data, n_tophits)
 
-        for i, (taxid, taxname, rrpm) in enumerate(topfifteen, start=1):
-            sample_org = sample_organism_data.get((sample_id, taxid))
-
-            # If number of organisms in a sample is less than 15, then the top 15 will include organisms not in the sample
-            # This needs to be checked
-            if sample_org is not None:
-                tophits_row = {
-                    "sampleName": sample_id,
-                    "taxID": taxid,
-                    "taxName": taxname,
-                    "rank": i,
-                    "rRPM": rrpm,
-                    "kmers": sample_org["kmers"],
-                    "dup": sample_org["dup"],
-                    "reads": sample_org["reads"],
-                    "cov": sample_org["cov"],
-                    "z_score": sample_org["z_score"],
-                }
-
-                tophits_data.append(tophits_row)
-
-    # Write the tophits data to tophits_path
-    tophits_fields = [
-        "sampleName",
-        "taxID",
-        "taxName",
-        "rank",
-        "rRPM",
-        "kmers",
-        "dup",
-        "reads",
-        "cov",
-        "z_score",
-    ]
-    with open(tophits_path, "w") as tophits_file:
-        writer = csv.DictWriter(tophits_file, fieldnames=tophits_fields)
-        writer.writeheader()
-
-        for row in tophits_data:
-            writer.writerow({x: str(y) for x, y in row.items()})
+    # Write the tophits file
+    write_file(
+        file_path=tophits_path,
+        data=tophits_data,
+        fieldnames=[
+            "sampleName",
+            "taxID",
+            "taxName",
+            "rank",
+            "rRPM",
+            "kmers",
+            "dup",
+            "reads",
+            "cov",
+            "z_score",
+        ],
+    )
 
 
 def main():
@@ -342,12 +362,21 @@ def main():
         default="species",
         help="Taxonomic rank to filter the reports by (default: species)",
     )
+    parser.add_argument(
+        "--n-tophits",
+        required=False,
+        type=int,
+        default=15,
+        help="Number of top hits to include in the tophits output (default: 15)",
+    )
+
     args = parser.parse_args()
 
     run(
         report_paths=args.reports,
         results_path=args.results,
         rank=args.rank,
+        n_tophits=args.n_tophits,
         group_patterns=args.negative_control_group,
     )
 
