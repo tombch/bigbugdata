@@ -78,8 +78,6 @@ def run(
     report_paths: list[str],
     results_path: str,
     negative_group_patterns: list[tuple[str, str]] | None,
-    dna_totalreads: str,
-    rna_totalreads: str,
 ):
     # Get output paths for the results
     combined_species_out, rrpm_out, tophits_out = get_output_paths(results_path)
@@ -93,14 +91,26 @@ def run(
     # Dictionary to store output combined species data
     combined_species_data: dict[int, dict[str, Any]] = {}
 
+    # Dictionary for storing the number of reads for each sample
+    n_reads = {}
+
     # For each report (and its corresponding sample name) in the folder
     for sample_name, report_path in sample_names.items():
         # Open the report file
         with open(report_path) as report_file:
+            # Skip the first two lines (headers)
+            report_file.readline()
+            report_file.readline()
             report_reader = csv.DictReader(report_file, delimiter="\t")
 
             # For each row in the report file
             for row in report_reader:
+                # Calculate total reads for the sample by summing root and unclassified reads
+                if row["taxID"] in ["0", "1"]:
+                    n_reads.setdefault(sample_name, 0)
+                    n_reads[sample_name] += int(row["reads"])
+                    continue
+
                 # Skip rows that are not at the species level
                 if row["rank"] != "species":
                     continue
@@ -156,25 +166,6 @@ def run(
         for row in combined_species_list:
             writer.writerow({x: str(y) for x, y in row.items()})
 
-    # Dictionary for storing the num million reads for each sample
-    num_million_reads = {}
-
-    # Open DNA tsv and add the sample number + num million reads for each sample
-    with open(dna_totalreads) as dna_file:
-        dna_data = csv.reader(dna_file, delimiter="\t")
-        for row in dna_data:
-            sample = row[0]
-            num = row[3]
-            num_million_reads[sample.split("_")[0]] = float(num)
-
-    # Open RNA tsv and add the sample number + num million reads for each sample
-    with open(rna_totalreads) as rna_file:
-        rna_data = csv.reader(rna_file, delimiter="\t")
-        for row in rna_data:
-            sample = row[0]
-            num = row[3]
-            num_million_reads[sample.split("_")[0]] = float(num)
-
     # Calculate RPM for each organism and sample
     rpm_data = []
     for row in combined_species_list:
@@ -186,7 +177,7 @@ def run(
 
         # For the sample columns, divide the value by num_million_reads for the sample
         for sample in sample_names:
-            rpm_row[sample] = int(row[sample]) / num_million_reads[sample]
+            rpm_row[sample] = int(row[sample]) / (n_reads[sample] / 1_000_000)
 
         # Add new row to rpm_data
         rpm_data.append(rpm_row)
@@ -306,6 +297,13 @@ def main():
         help="Input KrakenUniq report files",
     )
     parser.add_argument(
+        "--results",
+        required=False,
+        type=str,
+        default="results",
+        help="Directory to store the output files (default: results)",
+    )
+    parser.add_argument(
         "--negative-group",
         required=False,
         nargs=2,
@@ -313,31 +311,12 @@ def main():
         metavar=("NEGATIVE_SAMPLE_PATTERN", "NEGATIVE_GROUP_PATTERN"),
         help="Negative control group definition. Provide patterns for matching the negative sample and its group.",
     )
-    parser.add_argument(
-        "--dna-totalreads",
-        required=True,
-        type=str,
-        help="Input .tsv file of DNA total reads",
-    )
-    parser.add_argument(
-        "--rna-totalreads", required=True, help="Input .tsv file of RNA total reads"
-    )
-    parser.add_argument(
-        "--results",
-        required=False,
-        type=str,
-        default="results",
-        help="Directory to store the output files (default: results)",
-    )
-
     args = parser.parse_args()
 
     run(
         report_paths=args.reports,
         results_path=args.results,
         negative_group_patterns=args.negative_group,
-        dna_totalreads=args.dna_totalreads,
-        rna_totalreads=args.rna_totalreads,
     )
 
 
