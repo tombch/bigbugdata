@@ -348,6 +348,7 @@ def run(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "-r",
         "--reports",
         required=True,
         type=str,
@@ -355,13 +356,15 @@ def main():
         help="Input KrakenUniq report files",
     )
     parser.add_argument(
-        "--results",
+        "-o",
+        "--output",
         required=False,
         type=str,
         default="results",
         help="Directory to store the output files (default: results)",
     )
     parser.add_argument(
+        "-n",
         "--negative-control-group",
         required=False,
         nargs=2,
@@ -370,6 +373,7 @@ def main():
         help="Provide REGEX patterns to match a negative control and its group of samples.",
     )
     parser.add_argument(
+        "-R",
         "--rank",
         required=False,
         type=str,
@@ -377,6 +381,7 @@ def main():
         help="Taxonomic rank to filter the reports by (default: species)",
     )
     parser.add_argument(
+        "-t",
         "--tophits",
         required=False,
         type=int,
@@ -388,7 +393,7 @@ def main():
 
     run(
         report_paths=args.reports,
-        results_path=args.results,
+        results_path=args.output,
         rank=args.rank,
         n_tophits=args.tophits,
         group_patterns=args.negative_control_group,
