@@ -363,7 +363,7 @@ def main():
         help="Taxonomic rank to filter the reports by (default: species)",
     )
     parser.add_argument(
-        "--n-tophits",
+        "--tophits",
         required=False,
         type=int,
         default=15,
@@ -376,7 +376,7 @@ def main():
         report_paths=args.reports,
         results_path=args.results,
         rank=args.rank,
-        n_tophits=args.n_tophits,
+        n_tophits=args.tophits,
         group_patterns=args.negative_control_group,
     )
 
