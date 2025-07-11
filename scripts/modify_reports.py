@@ -2,6 +2,7 @@ import csv
 import os
 from pathlib import Path
 import argparse
+from datetime import datetime
 
 
 def create_complete_reports(
@@ -92,6 +93,14 @@ def create_complete_reports(
 
         # Write complete report
         with open(complete_report_path, "w") as complete_file:
+            # Write the two header lines
+            complete_file.write(
+                f"# kraken2 --db /path/to/krakendb --threads 8 --paired --output {sample_name}_kraken.out --report {sample_name}_species-level-report.tsv\n"
+            )
+            complete_file.write(
+                f"# {datetime.now().strftime('%a %b %d %H:%M:%S %Y')}\n"
+            )
+
             writer = csv.DictWriter(
                 complete_file, fieldnames=fieldnames, delimiter="\t"
             )
@@ -155,7 +164,7 @@ def main():
     )
     parser.add_argument(
         "--output-dir",
-        default="complete_reports",
+        default="data/complete_reports",
         help="Output directory for complete reports (default: complete_reports)",
     )
 
