@@ -33,6 +33,22 @@ def get_sample_ids(report_paths: list[str]) -> dict[str, str]:
     }
 
 
+def get_ordered_sample_ids(sample_ids: list[str]) -> list[str]:
+    """
+    Get sample IDs ordered by their numeric value, if possible.
+    If not numeric, return them sorted as strings.
+    """
+
+    try:
+        # Try to convert sample IDs to integers for sorting
+        ordered_sample_ids = sorted(sample_ids, key=lambda x: int(x))
+    except ValueError:
+        # If conversion fails, sort them as strings
+        ordered_sample_ids = sorted(sample_ids)
+
+    return ordered_sample_ids
+
+
 def get_negative_control_groups(
     sample_ids: list[str],
     group_patterns: list[tuple[str, str]] | None,
@@ -266,14 +282,12 @@ def run(
                 combined_taxa_data[organism]["Total # of Reads"] += int(row["reads"])
 
     # Display the output rows and columns in alphabetical order
-    sample_ids = list(map(int, sample_ids))
-    sample_ids.sort()
-    sample_ids = list(map(str, sample_ids))
-    organisms = list(combined_taxa_data.keys())
-    organisms.sort()
+    sample_ids = get_ordered_sample_ids(list(sample_ids))
 
     # Format data into list of dictionaries
-    combined_taxa_list = [combined_taxa_data[organism] for organism in organisms]
+    combined_taxa_list = [
+        combined_taxa_data[organism] for organism in sorted(list(combined_taxa_data))
+    ]
 
     # Write the combined_taxa file
     write_file(
