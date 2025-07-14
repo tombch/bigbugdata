@@ -1,11 +1,19 @@
 import os
 import re
 import csv
+import logging
 import argparse
 from typing import Any
 from pathlib import Path
 from importlib.metadata import version
 from scipy import stats
+
+
+# Set up logging
+logging.basicConfig(
+    format="[%(levelname)s] %(message)s",
+    level=logging.INFO,
+)
 
 
 def get_output_paths(results_dir: str, rank: str) -> tuple[Path, Path, Path]:
@@ -87,6 +95,8 @@ def get_negative_control_groups(
 
             # Add negative sample and group samples to the negative group dictionary
             negative_groups[negative_sample] = set(matching_group_samples)
+            logging.info(f"Negative Control ID: {negative_sample}")
+            logging.info(f"Negative Control Group: {', '.join(matching_group_samples)}")
 
     return negative_groups
 
@@ -203,6 +213,7 @@ def write_file(
     Write the data to a CSV file at the specified path.
     """
 
+    logging.info(f"Writing data to {file_path}")
     with open(file_path, "w") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
@@ -398,6 +409,7 @@ def main():
     )
 
     args = parser.parse_args()
+    logging.info(f"bigbugdata v{version('bigbugdata')}")
 
     run(
         report_paths=args.reports,
