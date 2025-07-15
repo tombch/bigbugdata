@@ -196,6 +196,7 @@ def get_tophits(
                     "dup": sample_org["dup"],
                     "reads": sample_org["reads"],
                     "cov": sample_org["cov"],
+                    "e_val": sample_org["e_val"],
                     "z_score": sample_org["z_score"],
                 }
 
@@ -267,12 +268,19 @@ def run(
                 # The taxID of the current organism
                 organism = int(row["taxID"])
 
+                # Calculate E-value
+                kmers = int(row["kmers"])
+                reads = int(row["reads"])
+                cov = float(row["cov"])
+                e_val = (kmers / reads) * cov
+
                 # Stored for future use in tophits output
                 sample_organism_data[(sample_id, organism)] = {
                     "kmers": row["kmers"],
                     "dup": row["dup"],
                     "reads": row["reads"],
                     "cov": row["cov"],
+                    "e_val": e_val,
                 }
 
                 # If the organism hasn't been recorded in the combined taxa data, make a new entry for it
@@ -352,6 +360,7 @@ def run(
             "dup",
             "reads",
             "cov",
+            "e_val",
             "z_score",
         ],
     )
