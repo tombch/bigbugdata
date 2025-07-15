@@ -1,113 +1,116 @@
-from scipy import stats
-import argparse
-import glob
-import csv
 import os
+import re
+import csv
+import logging
+import argparse
+from typing import Any
+from pathlib import Path
+from importlib.metadata import version
+from scipy import stats
 
 
-def run(
-    species_level_reports,
-    dna_totalreads,
-    rna_totalreads,
-    combined_species_out,
-    rrpm_out,
-    tophits_out,
-):
-    # List of file paths for each input kraken tsv
-    species_level_paths = glob.glob(f"{species_level_reports}/*.tsv")
+# Set up logging
+logging.basicConfig(
+    format="[%(levelname)s] %(message)s",
+    level=logging.INFO,
+)
 
-    # Sample names from each tsv
-    sample_names = [
-        os.path.basename(tsv_path).split("_")[0] for tsv_path in species_level_paths
-    ]
 
-    # Data needed for final tophits output
-    sample_organism_data = {}
+def get_output_paths(results_dir: str, rank: str) -> tuple[Path, Path, Path]:
+    """
+    Get the output file paths for combined taxa, rrpm, and tophits.
+    """
 
-    # Dictionary to store output combined species data
-    combined_species_data = {}
+    # Create the results directory if it doesn't exist
+    Path(results_dir).mkdir(parents=True, exist_ok=True)
 
-    # For each tsv (and its corresponding sample name) in the folder
-    for tsv_path, sample_name in zip(species_level_paths, sample_names):
-        # Open the tsv file
-        with open(tsv_path) as tsv_file:
-            tsv_reader = csv.DictReader(tsv_file, delimiter="\t")
+    # Output file paths
+    combined_taxa_path = Path(results_dir) / f"combined_{rank}.csv"
+    rrpm_path = Path(results_dir) / f"rrpm_{rank}.csv"
+    tophits_path = Path(results_dir) / f"tophits_{rank}.csv"
 
-            # For each row in the tsv file
-            for row in tsv_reader:
-                # The taxID of the current organism
-                organism = int(row["taxID"])
+    return combined_taxa_path, rrpm_path, tophits_path
 
-                # Stored for future use in tophits output
-                sample_organism_data[(sample_name, organism)] = {
-                    "kmers": row["kmers"],
-                    "dup": row["dup"],
-                    "reads": row["reads"],
-                    "cov": row["cov"],
-                }
 
-                # If the organism hasn't been recorded in the combined species data, make a new entry for it
-                if combined_species_data.get(organism) is None:
-                    # The entry for this organism contains the number of reads recorded for each sample
-                    combined_species_data[organism] = {
-                        s_name: 0 for s_name in sample_names
-                    }
+def get_sample_ids(report_paths: list[str]) -> dict[str, str]:
+    """
+    Get mapping of sample IDs to their report paths by partitioning on the last underscore.
+    """
 
-                    # The entry also contains the taxID, taxName and total number of reads for the organism
-                    combined_species_data[organism]["taxID"] = organism
-                    combined_species_data[organism]["taxName"] = row[
-                        "taxName"
-                    ].strip()  # damn you kraken
-                    combined_species_data[organism]["Total # of Reads"] = 0
+    return {
+        os.path.basename(report).rpartition("_")[0]: report for report in report_paths
+    }
 
-                # For the current organism and sample, add the number of reads
-                combined_species_data[organism][sample_name] += int(row["reads"])
-                combined_species_data[organism]["Total # of Reads"] += int(row["reads"])
 
-    # Display the output rows and columns in alphabetical order
-    sample_names = list(map(int, sample_names))
-    sample_names.sort()
-    sample_names = list(map(str, sample_names))
-    organisms = list(combined_species_data.keys())
-    organisms.sort()
+def get_ordered_sample_ids(sample_ids: list[str]) -> list[str]:
+    """
+    Get sample IDs ordered by their numeric value, if possible.
+    If not numeric, return them sorted as strings.
+    """
 
-    # Reformat data into list of dictionaries
-    combined_species_data = [combined_species_data[organism] for organism in organisms]
+    try:
+        # Try to convert sample IDs to integers for sorting
+        ordered_sample_ids = sorted(sample_ids, key=lambda x: int(x))
+    except ValueError:
+        # If conversion fails, sort them as strings
+        ordered_sample_ids = sorted(sample_ids)
 
-    # Write the data to combined_species_out
-    with open(combined_species_out, "w") as combined_species_file:
-        writer = csv.DictWriter(
-            combined_species_file,
-            fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_names,
-        )
+    return ordered_sample_ids
 
-        writer.writeheader()
 
-        for row in combined_species_data:
-            writer.writerow({x: str(y) for x, y in row.items()})
+def get_negative_control_groups(
+    sample_ids: list[str],
+    group_patterns: list[tuple[str, str]] | None,
+) -> dict[str, set[str]]:
+    """
+    Get a dictionary mapping negative control samples to their groups based on the provided patterns.
+    """
 
-    # Dictionary for storing the num million reads for each sample
-    num_million_reads = {}
+    negative_groups = {}
 
-    # Open DNA tsv and add the sample number + num million reads for each sample
-    with open(dna_totalreads) as dna_file:
-        dna_data = csv.reader(dna_file, delimiter="\t")
-        for row in dna_data:
-            sample = row[0]
-            num = row[3]
-            num_million_reads[sample.split("_")[0]] = float(num)
+    if group_patterns is not None:
+        for negative_sample_pattern, negative_group_pattern in group_patterns:
+            # Find sample that matches the negative sample pattern
+            matching_negative_samples = [
+                sample_id
+                for sample_id in sample_ids
+                if re.search(negative_sample_pattern, sample_id)
+            ]
+            if len(matching_negative_samples) != 1:
+                raise ValueError(
+                    f"Expected one sample matching '{negative_sample_pattern}', found: {len(matching_negative_samples)}"
+                )
+            negative_sample = matching_negative_samples[0]
 
-    # Open RNA tsv and add the sample number + num million reads for each sample
-    with open(rna_totalreads) as rna_file:
-        rna_data = csv.reader(rna_file, delimiter="\t")
-        for row in rna_data:
-            sample = row[0]
-            num = row[3]
-            num_million_reads[sample.split("_")[0]] = float(num)
+            # Find all samples that match the negative group pattern
+            matching_group_samples = [
+                sample_id
+                for sample_id in sample_ids
+                if re.search(negative_group_pattern, sample_id)
+            ]
+            if not matching_group_samples:
+                raise ValueError(
+                    f"No samples found matching the group pattern '{negative_group_pattern}'"
+                )
 
-    # Calculate RPM for each organism and sample
+            # Add negative sample and group samples to the negative group dictionary
+            negative_groups[negative_sample] = set(matching_group_samples)
+            logging.info(f"Negative Control ID: {negative_sample}")
+            logging.info(f"Negative Control Group: {', '.join(matching_group_samples)}")
+
+    return negative_groups
+
+
+def get_rpms(
+    combined_taxa_list: list[dict[str, Any]],
+    n_reads: dict[str, int],
+) -> list[dict[str, Any]]:
+    """
+    Calculate RPM for each organism and sample based on the combined taxa data and number of reads.
+    """
+
     rpm_data = []
-    for row in combined_species_data:
+    for row in combined_taxa_list:
         rpm_row = {
             "taxID": row["taxID"],
             "taxName": row["taxName"],
@@ -115,36 +118,24 @@ def run(
         }
 
         # For the sample columns, divide the value by num_million_reads for the sample
-        for sample in sample_names:
-            rpm_row[sample] = int(row[sample]) / num_million_reads[sample]
+        for sample_id in n_reads:
+            rpm_row[sample_id] = int(row[sample_id]) / (n_reads[sample_id] / 1_000_000)
 
         # Add new row to rpm_data
         rpm_data.append(rpm_row)
 
-    # For each organism, calculate z scores in each sample of their rpm
-    for row in rpm_data:
-        # z scores for a single organism, across all samples
-        z_scores = [x for x in stats.zscore([row[sample] for sample in sample_names])]
+    return rpm_data
 
-        for sample, z_score in zip(sample_names, z_scores):
-            if sample_organism_data.get((sample, row["taxID"])):
-                sample_organism_data[(sample, row["taxID"])]["z_score"] = z_score
 
-    # Set up negative groups
-    negative_group = {
-        "6": {str(x) for x in range(1, 7)},
-        "18": {str(x) for x in range(7, 19)},
-        "30": {str(x) for x in range(19, 31)},
-        "42": {str(x) for x in range(31, 43)},
-        "48": {str(x) for x in range(43, 49)},
-        "54": {str(x) for x in range(49, 55)},
-        "66": {str(x) for x in range(55, 67)},
-        "78": {str(x) for x in range(67, 79)},
-        "90": {str(x) for x in range(79, 91)},
-        "95": {str(x) for x in range(91, 96)},
-    }
+def get_rrpms(
+    rpm_data: list[dict[str, Any]],
+    sample_ids: list[str],
+    negative_groups: dict[str, set[str]],
+) -> list[dict[str, Any]]:
+    """
+    Calculate rRPM for each organism and sample based on the RPM data and negative control groups.
+    """
 
-    # Calculate rRPM for each organism and sample
     rrpm_data = []
     for row in rpm_data:
         rrpm_row = {
@@ -153,53 +144,50 @@ def run(
             "Total # of Reads": row["Total # of Reads"],
         }
 
-        for sample in sample_names:
-            negative_sample = ""
-            for negative, group in negative_group.items():
-                if sample in group:
-                    negative_sample = negative
+        for sample_id in sample_ids:
+            negative_control_id = ""
+            for negative, group in negative_groups.items():
+                if sample_id in group:
+                    negative_control_id = negative
                     break
 
-            negative_value = 0
-            for s in sample_names:
-                if s == negative_sample:
-                    negative_value = int(row[s])
-                    break
+            negative_control_rpm = int(row.get(negative_control_id, 1))
+            if negative_control_rpm == 0:
+                negative_control_rpm = 1
 
-            if negative_value == 0:
-                negative_value = 1
-
-            # Add new row to rrpm_data
-            rrpm_row[sample] = int(row[sample]) / int(negative_value)
+            # Calculate rRPM as RPM of the sample divided by RPM of the negative control
+            rrpm_row[sample_id] = int(row[sample_id]) / int(negative_control_rpm)
 
         rrpm_data.append(rrpm_row)
 
-    # Write the data to rrpm_out
-    with open(rrpm_out, "w") as rrpm_file:
-        writer = csv.DictWriter(
-            rrpm_file,
-            fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_names,
-        )
+    return rrpm_data
 
-        writer.writeheader()
 
-        for row in rrpm_data:
-            writer.writerow({x: str(y) for x, y in row.items()})
+def get_tophits(
+    rrpm_data: list[dict[str, Any]],
+    sample_ids: list[str],
+    sample_organism_data: dict[tuple[str, int], dict[str, Any]],
+    n_tophits: int,
+) -> list[dict[str, Any]]:
+    """
+    Get the top hits for each sample based on the rRPM data.
+    """
 
-    # Calculate tophits for each sample
     tophits_data = []
-    for sample in sample_names:
-        sorted_data = sorted(rrpm_data, key=lambda x: x[sample], reverse=True)
-        topfifteen = [(x["taxID"], x["taxName"], x[sample]) for x in sorted_data[0:15]]
+    for sample_id in sample_ids:
+        sorted_data = sorted(rrpm_data, key=lambda x: x[sample_id], reverse=True)
+        tophits = [
+            (x["taxID"], x["taxName"], x[sample_id]) for x in sorted_data[0:n_tophits]
+        ]
 
-        for i, (taxid, taxname, rrpm) in enumerate(topfifteen, start=1):
-            sample_org = sample_organism_data.get((sample, taxid))
+        for i, (taxid, taxname, rrpm) in enumerate(tophits, start=1):
+            sample_org = sample_organism_data.get((sample_id, taxid))
 
-            # If number of organisms in a sample is less than 15, then the top 15 will include organisms not in the sample
-            # This needs to be checked
+            # If number of organisms in a sample is less than 15, then the top n_tophits will include organisms not in the sample
+            # This needs to be checked <-- TODO what does this mean?
             if sample_org is not None:
                 tophits_row = {
-                    "sampleName": sample,
+                    "sampleName": sample_id,
                     "taxID": taxid,
                     "taxName": taxname,
                     "rank": i,
@@ -213,67 +201,222 @@ def run(
 
                 tophits_data.append(tophits_row)
 
-    # Write the data to tophits_out
-    with open(tophits_out, "w") as tophits_file:
-        writer = csv.DictWriter(
-            tophits_file,
-            fieldnames=[
-                "sampleName",
-                "taxID",
-                "taxName",
-                "rank",
-                "rRPM",
-                "kmers",
-                "dup",
-                "reads",
-                "cov",
-                "z_score",
-            ],
-        )
+    return tophits_data
 
+
+def write_file(
+    file_path: Path,
+    data: list[dict[str, Any]],
+    fieldnames: list[str],
+):
+    """
+    Write the data to a CSV file at the specified path.
+    """
+
+    logging.info(f"Writing data to {file_path}")
+    with open(file_path, "w") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
-
-        for row in tophits_data:
+        for row in data:
             writer.writerow({x: str(y) for x, y in row.items()})
+
+
+def run(
+    report_paths: list[str],
+    results_path: str,
+    rank: str,
+    n_tophits: int,
+    group_patterns: list[tuple[str, str]] | None,
+):
+    # Output paths for the results
+    combined_taxa_path, rrpm_path, tophits_path = get_output_paths(results_path, rank)
+
+    # Mapping of sample IDs to their report paths
+    sample_ids = get_sample_ids(report_paths)
+
+    # Mapping of sample ID and taxID to their data
+    sample_organism_data: dict[tuple[str, int], dict[str, Any]] = {}
+
+    # Dictionary to store combined taxa data
+    combined_taxa_data: dict[int, dict[str, Any]] = {}
+
+    # Mapping of sample ID to total number of reads
+    n_reads = {}
+
+    # For each sample ID (and its corresponding report)
+    for sample_id, report_path in sample_ids.items():
+        # Open the report file
+        with open(report_path) as report_file:
+            # Skip the first two lines (headers)
+            report_file.readline()
+            report_file.readline()
+            report_reader = csv.DictReader(report_file, delimiter="\t")
+
+            # For each row in the report file
+            for row in report_reader:
+                # Calculate total reads for the sample by adding root and unclassified read counts
+                if row["taxID"] in ["0", "1"]:
+                    n_reads.setdefault(sample_id, 0)
+                    n_reads[sample_id] += int(row["reads"])
+                    continue
+
+                # Skip all other rows that are not at the specified rank
+                if row["rank"] != rank:
+                    continue
+
+                # The taxID of the current organism
+                organism = int(row["taxID"])
+
+                # Stored for future use in tophits output
+                sample_organism_data[(sample_id, organism)] = {
+                    "kmers": row["kmers"],
+                    "dup": row["dup"],
+                    "reads": row["reads"],
+                    "cov": row["cov"],
+                }
+
+                # If the organism hasn't been recorded in the combined taxa data, make a new entry for it
+                if combined_taxa_data.get(organism) is None:
+                    # The entry for this organism contains the number of reads recorded for each sample
+                    combined_taxa_data[organism] = {
+                        sample_id: 0 for sample_id in sample_ids
+                    }
+
+                    # The entry also contains the taxID, taxName and total number of reads for the organism
+                    combined_taxa_data[organism]["taxID"] = organism
+                    combined_taxa_data[organism]["taxName"] = row[
+                        "taxName"
+                    ].strip()  # damn you kraken
+                    combined_taxa_data[organism]["Total # of Reads"] = 0
+
+                # For the current organism and sample, add the number of reads
+                combined_taxa_data[organism][sample_id] += int(row["reads"])
+                combined_taxa_data[organism]["Total # of Reads"] += int(row["reads"])
+
+    # Display the output rows and columns in alphabetical order
+    sample_ids = get_ordered_sample_ids(list(sample_ids))
+
+    # Format data into list of dictionaries
+    combined_taxa_list = [
+        combined_taxa_data[organism] for organism in sorted(list(combined_taxa_data))
+    ]
+
+    # Write the combined_taxa file
+    write_file(
+        file_path=combined_taxa_path,
+        data=combined_taxa_list,
+        fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_ids,
+    )
+
+    # Calculate RPM for each organism and sample
+    rpm_data = get_rpms(combined_taxa_list, n_reads)
+
+    # For each organism, calculate z scores in each sample of their rpm
+    for row in rpm_data:
+        # z scores for a single organism, across all samples
+        z_scores = [
+            x for x in stats.zscore([row[sample_id] for sample_id in sample_ids])
+        ]
+
+        for sample_id, z_score in zip(sample_ids, z_scores):
+            if sample_organism_data.get((sample_id, row["taxID"])):
+                sample_organism_data[(sample_id, row["taxID"])]["z_score"] = z_score
+
+    # Set up negative groups
+    negative_groups = get_negative_control_groups(sample_ids, group_patterns)
+
+    # Calculate rRPM for each organism and sample
+    rrpm_data = get_rrpms(rpm_data, sample_ids, negative_groups)
+
+    # Write the rrpm file
+    write_file(
+        file_path=rrpm_path,
+        data=rrpm_data,
+        fieldnames=["taxID", "taxName", "Total # of Reads"] + sample_ids,
+    )
+
+    # Calculate tophits for each sample
+    tophits_data = get_tophits(rrpm_data, sample_ids, sample_organism_data, n_tophits)
+
+    # Write the tophits file
+    write_file(
+        file_path=tophits_path,
+        data=tophits_data,
+        fieldnames=[
+            "sampleName",
+            "taxID",
+            "taxName",
+            "rank",
+            "rRPM",
+            "kmers",
+            "dup",
+            "reads",
+            "cov",
+            "z_score",
+        ],
+    )
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--species-level-reports",
+        "-r",
+        "--reports",
         required=True,
-        help="Input directory of species level report .tsv files",
+        type=str,
+        nargs="+",
+        help="Input KrakenUniq report files",
     )
     parser.add_argument(
-        "--dna-totalreads", required=True, help="Input .tsv file of DNA total reads"
+        "-o",
+        "--output",
+        required=False,
+        type=str,
+        default="results",
+        help="Directory to store the output files (default: results)",
     )
     parser.add_argument(
-        "--rna-totalreads", required=True, help="Input .tsv file of RNA total reads"
-    )
-
-    parser.add_argument(
-        "--combined-species-out",
-        required=True,
-        help="Output .csv file for the combined species data",
-    )
-    parser.add_argument(
-        "--rrpm-out", required=True, help="Output .csv file for the rrpm data"
+        "-n",
+        "--nc-group",
+        required=False,
+        nargs=2,
+        action="append",
+        metavar=("CONTROL", "GROUP"),
+        help="Provide REGEX patterns to match a negative control and its group of samples",
     )
     parser.add_argument(
-        "--tophits-out",
-        required=True,
-        help="Output .csv file for the tophits data",
+        "-R",
+        "--rank",
+        required=False,
+        type=str,
+        default="species",
+        help="Taxonomic rank to filter the reports by (default: species)",
+    )
+    parser.add_argument(
+        "-t",
+        "--tophits",
+        required=False,
+        type=int,
+        default=15,
+        help="Number of top hits to include in the tophits output (default: 15)",
+    )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {version('bigbugdata')}",
+        help="Output the version of bigbugdata",
     )
 
     args = parser.parse_args()
+    logging.info(f"bigbugdata v{version('bigbugdata')}")
 
     run(
-        species_level_reports=args.species_level_reports,
-        dna_totalreads=args.dna_totalreads,
-        rna_totalreads=args.rna_totalreads,
-        combined_species_out=args.combined_species_out,
-        rrpm_out=args.rrpm_out,
-        tophits_out=args.tophits_out,
+        report_paths=args.reports,
+        results_path=args.output,
+        rank=args.rank,
+        n_tophits=args.tophits,
+        group_patterns=args.nc_group,
     )
 
 
