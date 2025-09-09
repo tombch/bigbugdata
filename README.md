@@ -29,3 +29,13 @@ options:
                         Number of top hits to include in the tophits output (default: 15)
   -v, --version         Output the version of bigbugdata
 ```
+
+### Example Usage
+
+Lets consider an example naming system, where samples are split into four groups: `CF_DNA`, `CF_RNA`, `CP_DNA` and `CP_RNA`. There is a negative control for each group - these are found in the samples starting with the prefixes `CF_DNA_Negative`, `CF_RNA_Negative`, `CP_DNA_Negative` and `CP_RNA_Negative`.
+
+Then an example `bigbugdata` command would be:
+
+```
+$ bigbugdata --reports /path/to/reports/dir --output /path/to/output/dir --nc-group CF_DNA_Negative CF_DNA --nc-group CF_RNA_Negative CF_RNA --nc-group CP_DNA_Negative CP_DNA --nc-group CP_RNA_Negative CP_RNA
+```
