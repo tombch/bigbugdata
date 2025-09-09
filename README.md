@@ -37,5 +37,5 @@ Lets consider an example naming system, where samples are split into four groups
 Then an example `bigbugdata` command would be:
 
 ```
-$ bigbugdata --reports /path/to/reports/dir --output /path/to/output/dir --nc-group CF_DNA_Negative CF_DNA --nc-group CF_RNA_Negative CF_RNA --nc-group CP_DNA_Negative CP_DNA --nc-group CP_RNA_Negative CP_RNA
+$ bigbugdata --reports /path/to/reports/*report.txt --output /path/to/output/dir --nc-group CF_DNA_Negative CF_DNA --nc-group CF_RNA_Negative CF_RNA --nc-group CP_DNA_Negative CP_DNA --nc-group CP_RNA_Negative CP_RNA
 ```
